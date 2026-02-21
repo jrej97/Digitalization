@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nicegui import ui
 
 from app.crud_edges import can_add_or_edit_edge
@@ -11,6 +13,7 @@ from app.formatting import format_inspector_rows
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
 from app.io_excel import load_workbook, save_workbook
+from app.sample_data import create_sample_workbook
 from app.validate import validate_data
 
 
@@ -65,7 +68,10 @@ def index() -> None:
         state['edges_df'] = edges_df
         refresh_graph_state()
     except (FileNotFoundError, ValueError) as error:
-        state['status_text'] = f'Workbook error: {error}'
+        state['status_text'] = (
+            f"Workbook error: {error} "
+            "Tip: click 'Create Sample Workbook' to generate a starter file."
+        )
         state['status_classes'] = 'text-sm text-rose-300'
 
     with ui.row().classes('w-full h-screen no-wrap bg-slate-100'):
@@ -82,6 +88,7 @@ def index() -> None:
             manage_button = ui.button('Manage Nodes').props('outline')
             manage_edges_button = ui.button('Manage Edges').props('outline')
             save_button = ui.button('Save to Excel').props('color=primary')
+            sample_button = ui.button('Create Sample Workbook').props('outline')
             export_csv_button = ui.button('Export CSV').props('outline')
             export_gexf_button = ui.button('Export GEXF').props('outline')
 
@@ -586,10 +593,54 @@ def index() -> None:
         gexf_path = export_gexf(nx_graph)
         ui.notify(f'Exported GEXF: {gexf_path}', type='positive')
 
+    def apply_loaded_workbook(nodes_df, edges_df) -> bool:
+        validation_errors = validate_data(nodes_df, edges_df)
+        if validation_errors:
+            set_validation_error_state(validation_errors)
+            ui.notify('Sample workbook validation failed unexpectedly', type='negative')
+            return False
+
+        state['nodes_df'] = nodes_df
+        state['edges_df'] = edges_df
+        refresh_graph_state()
+        refresh_sidebar_status()
+        refresh_nodes_table()
+        refresh_edges_table()
+        render_graph_view()
+        clear_selection()
+        return True
+
+    def create_sample_and_reload() -> None:
+        workbook_path = 'data/data.xlsx'
+        created_path = create_sample_workbook(workbook_path)
+        nodes_df, edges_df = load_workbook(workbook_path)
+        if apply_loaded_workbook(nodes_df, edges_df):
+            ui.notify(f'Created sample workbook at {created_path}', type='positive')
+
+    def on_create_sample_workbook() -> None:
+        workbook_path = Path('data/data.xlsx')
+        if workbook_path.exists():
+            with ui.dialog() as dialog, ui.card().classes('w-96'):
+                ui.label('Overwrite existing workbook?').classes('text-lg font-semibold')
+                ui.label("data/data.xlsx already exists. This will replace it.")
+
+                def confirm_overwrite() -> None:
+                    create_sample_and_reload()
+                    dialog.close()
+
+                with ui.row().classes('w-full justify-end gap-2'):
+                    ui.button('Cancel', on_click=dialog.close).props('outline')
+                    ui.button('Overwrite', on_click=confirm_overwrite)
+            dialog.open()
+            return
+
+        create_sample_and_reload()
+
     manage_button.on_click(render_manage_nodes_view)
     manage_edges_button.on_click(render_manage_edges_view)
     back_button.on_click(render_graph_view)
     save_button.on_click(on_save_to_excel)
+    sample_button.on_click(on_create_sample_workbook)
     export_csv_button.on_click(on_export_csv)
     export_gexf_button.on_click(on_export_gexf)
 
