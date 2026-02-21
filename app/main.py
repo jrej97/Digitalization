@@ -2,6 +2,7 @@
 
 from nicegui import ui
 
+from app.graph_build import build_cytoscape_elements
 from app.io_excel import load_workbook
 from app.validate import validate_data
 
@@ -12,6 +13,7 @@ def index() -> None:
     status_text = ''
     status_classes = 'text-sm '
     validation_messages: list[str] = []
+    built_elements_status = ''
 
     try:
         nodes_df, edges_df = load_workbook()
@@ -24,6 +26,10 @@ def index() -> None:
         else:
             status_text = f'Loaded: {len(nodes_df)} nodes, {len(edges_df)} edges'
             status_classes += 'text-emerald-300'
+            elements = build_cytoscape_elements(nodes_df, edges_df)
+            node_elements = sum(1 for element in elements if 'label' in element['data'])
+            edge_elements = sum(1 for element in elements if 'source' in element['data'])
+            built_elements_status = f'Built: {node_elements} node elements, {edge_elements} edge elements'
     except (FileNotFoundError, ValueError) as error:
         status_text = f'Workbook error: {error}'
         status_classes += 'text-rose-300'
@@ -32,6 +38,8 @@ def index() -> None:
         with ui.column().classes('w-1/5 min-w-52 h-full bg-slate-900 text-white p-4 gap-3'):
             ui.label('Sidebar').classes('text-lg font-semibold')
             ui.label(status_text).classes(status_classes)
+            if built_elements_status:
+                ui.label(built_elements_status).classes('text-xs text-emerald-100')
             for message in validation_messages:
                 ui.label(f'• {message}').classes('text-xs text-amber-100')
             ui.separator().classes('bg-slate-700')
