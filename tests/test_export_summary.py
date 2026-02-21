@@ -16,6 +16,9 @@ def test_export_summary_writes_markdown_with_counts_and_extras(tmp_path: Path) -
             'type': ['Person', 'Place', 'Institution'],
             'description': ['', '', ''],
             'alias': ['A', '', 'X'],
+            'source_ref': ['Doc A', '', 'Doc C'],
+            'date': ['2024-01-01', '', '2024-01-03'],
+            'confidence': [0.2, '', 0.9],
         }
     )
     edges_df = pd.DataFrame(
@@ -25,6 +28,9 @@ def test_export_summary_writes_markdown_with_counts_and_extras(tmp_path: Path) -
             'relationship_type': ['VISITED', 'AFFILIATED_WITH'],
             'description': ['', ''],
             'weight': [1, 2],
+            'source_ref': ['Doc A', ''],
+            'date': ['2024-01-01', ''],
+            'confidence': [0.5, ''],
         }
     )
 
@@ -38,6 +44,13 @@ def test_export_summary_writes_markdown_with_counts_and_extras(tmp_path: Path) -
     assert 'Edge count: 2' in content
     assert '## Nodes by type' in content
     assert '## Edges by relationship_type' in content
+    assert '## Provenance coverage' in content
+    assert 'Nodes with source_ref: 2/3 (66.7%)' in content
+    assert 'Edges with source_ref: 1/2 (50.0%)' in content
+    assert 'Node confidence (min/mean/max): 0.200/0.550/0.900' in content
+    assert 'Edge confidence (min/mean/max): 0.500/0.500/0.500' in content
+    assert 'Nodes with date: 2/3' in content
+    assert 'Edges with date: 1/2' in content
     assert '## Extra columns' in content
-    assert 'Nodes extras: alias' in content
-    assert 'Edges extras: weight' in content
+    assert 'Nodes extras: alias, confidence, date, source_ref' in content
+    assert 'Edges extras: confidence, date, source_ref, weight' in content

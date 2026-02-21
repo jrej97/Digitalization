@@ -18,6 +18,9 @@ def test_export_csv_writes_expected_files_and_columns(tmp_path: Path) -> None:
             'label': ['Node 1', 'Node 2'],
             'type': ['person', 'org'],
             'description': ['', 'Known associate'],
+            'source_ref': ['Doc A', 'Doc B'],
+            'date': ['2024-01-01', ''],
+            'confidence': [0.8, ''],
             'risk_score': [3, 7],
         }
     )
@@ -27,6 +30,9 @@ def test_export_csv_writes_expected_files_and_columns(tmp_path: Path) -> None:
             'target': ['N2'],
             'relationship_type': ['linked'],
             'description': ['Seen together'],
+            'source_ref': ['Doc A'],
+            'date': ['2024-01-01'],
+            'confidence': [0.9],
             'strength': [0.8],
         }
     )
@@ -46,6 +52,11 @@ def test_export_csv_writes_expected_files_and_columns(tmp_path: Path) -> None:
     assert exported_nodes_df.columns[: len(REQUIRED_NODE_COLS)].tolist() == REQUIRED_NODE_COLS
     assert exported_edges_df.columns[: len(REQUIRED_EDGE_COLS)].tolist() == REQUIRED_EDGE_COLS
 
+    expected_node_order = [*REQUIRED_NODE_COLS, 'source_ref', 'date', 'confidence', 'risk_score']
+    expected_edge_order = [*REQUIRED_EDGE_COLS, 'source_ref', 'date', 'confidence', 'strength']
+    assert exported_nodes_df.columns.tolist() == expected_node_order
+    assert exported_edges_df.columns.tolist() == expected_edge_order
+
     assert len(exported_nodes_df) == len(nodes_df)
     assert len(exported_edges_df) == len(edges_df)
 
@@ -58,6 +69,9 @@ def test_export_gexf_writes_nonempty_file(tmp_path: Path) -> None:
             'label': ['Node 1', 'Node 2'],
             'type': ['person', 'org'],
             'description': ['', ''],
+            'source_ref': ['Doc A', 'Doc B'],
+            'date': ['2024-01-01', '2024-01-02'],
+            'confidence': [0.7, 0.9],
         }
     )
     edges_df = pd.DataFrame(
@@ -66,6 +80,9 @@ def test_export_gexf_writes_nonempty_file(tmp_path: Path) -> None:
             'target': ['N2'],
             'relationship_type': ['linked'],
             'description': [''],
+            'source_ref': ['Doc A'],
+            'date': ['2024-01-01'],
+            'confidence': [0.85],
         }
     )
 
@@ -76,3 +93,8 @@ def test_export_gexf_writes_nonempty_file(tmp_path: Path) -> None:
 
     assert exported_path.exists()
     assert exported_path.stat().st_size > 0
+
+    content = exported_path.read_text(encoding='utf-8')
+    assert 'relationship_type' in content
+    assert 'source_ref' in content
+    assert 'confidence' in content

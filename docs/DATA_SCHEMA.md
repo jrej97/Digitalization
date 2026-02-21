@@ -28,6 +28,17 @@ Required columns (in canonical order):
 - Exports include extra attributes where the export format supports them (for example CSV/GEXF attributes).
 - When writing workbooks, required columns are written first, followed by any extra columns.
 
+### Well-known optional provenance fields (thesis-friendly)
+These fields are optional for both `nodes` and `edges`:
+- `source_ref`: short citation string (example: `Author 2020, p. 12`).
+- `date`: source/event date as text (ISO `YYYY-MM-DD` recommended).
+- `confidence`: numeric score in range `0..1`.
+
+Notes:
+- These are **not required** schema fields and are not hard-enforced in workbook validation.
+- If absent, the app ignores them.
+- If present, the app surfaces them in UI and exports.
+
 ## Validation rules (human-friendly)
 The app validates data before graph build/save/export:
 
