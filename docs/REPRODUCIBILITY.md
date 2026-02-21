@@ -14,6 +14,24 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+### Frozen environment (thesis path)
+
+Use `requirements-lock.txt` as the single pinned dependency snapshot for archival reproduction.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements-lock.txt
+pip install -e .
+```
+
+If `requirements-lock.txt` still contains placeholder instructions, regenerate it on a connected machine:
+
+```bash
+pip install -r requirements.txt
+pip freeze > requirements-lock.txt
+```
+
 Optional path overrides:
 
 - `DHVIZ_DATA_PATH` (default: `data/data.xlsx`)
@@ -66,6 +84,29 @@ python scripts/quality_gate.py
 ```
 
 Expected result: printed artifact paths and final `OK`.
+
+## Convenience commands
+
+A `Makefile` is provided for common flows:
+
+```bash
+make venv
+make install
+make run
+make test
+make quality
+```
+
+Windows PowerShell alternative (if `make` is unavailable):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pip install -e .
+python -m pytest -q
+python scripts/quality_gate.py
+```
 
 ## Suggested thesis artifact structure
 
