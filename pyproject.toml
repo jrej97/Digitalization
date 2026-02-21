@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "digitalization"
+version = "0.1.0"
+description = "Crime network NiceGUI app"
+requires-python = ">=3.10"
+dependencies = [
+    "nicegui",
+    "pandas",
+    "openpyxl",
+    "networkx",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

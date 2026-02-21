@@ -1,5 +1,9 @@
-import networkx as nx
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
+
+nx = pytest.importorskip("networkx")
 
 from app.graph_build import build_networkx_graph
 

@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
+
 
 from app.export import export_csv, export_gexf
 from app.graph_build import build_networkx_graph
@@ -47,6 +51,7 @@ def test_export_csv_writes_expected_files_and_columns(tmp_path: Path) -> None:
 
 
 def test_export_gexf_writes_nonempty_file(tmp_path: Path) -> None:
+    pytest.importorskip("networkx")
     nodes_df = pd.DataFrame(
         {
             'id': ['N1', 'N2'],

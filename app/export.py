@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import networkx as nx
+from typing import Any
+
 import pandas as pd
 
 from app.schema import REQUIRED_EDGE_COLS, REQUIRED_NODE_COLS
@@ -33,8 +34,10 @@ def export_csv(nodes_df: pd.DataFrame, edges_df: pd.DataFrame, out_dir: str = "e
     return str(nodes_path), str(edges_path)
 
 
-def export_gexf(nx_graph: nx.MultiGraph, out_path: str = "exports/graph.gexf") -> str:
+def export_gexf(nx_graph: Any, out_path: str = "exports/graph.gexf") -> str:
     """Export a NetworkX graph as GEXF at the requested output path."""
+    import networkx as nx
+
     output_path = Path(out_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     nx.write_gexf(nx_graph, output_path)
