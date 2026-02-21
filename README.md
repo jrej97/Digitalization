@@ -37,6 +37,8 @@ Then open the local URL shown in the terminal (typically `http://127.0.0.1:8080`
 - Data schema: [`docs/DATA_SCHEMA.md`](docs/DATA_SCHEMA.md)
 - Thesis workflow: [`docs/WORKFLOW.md`](docs/WORKFLOW.md)
 - Architecture summary: [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md)
+- Thesis appendix note: [`docs/THESIS_APPENDIX.md`](docs/THESIS_APPENDIX.md)
+- Reproducibility guide: [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md)
 
 ## Starter workbook
 
@@ -46,6 +48,12 @@ Use the sidebar action **Create Sample Workbook** to generate `data/data.xlsx` w
 
 ```bash
 pytest -q
+```
+
+## Optional no-UI smoke check
+
+```bash
+python scripts/smoke_check.py
 ```
 
 ## Thesis citation template
