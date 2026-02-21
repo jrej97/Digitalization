@@ -6,11 +6,35 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.config import get_default_data_path
 from app.io_excel import save_workbook
+from app.schema import REQUIRED_EDGE_COLS, REQUIRED_NODE_COLS
 
 
-def create_sample_workbook(path: str = "data/data.xlsx") -> str:
+def _ordered_columns(df: pd.DataFrame, required_columns: list[str]) -> list[str]:
+    """Return required columns first, then deterministically sorted extra columns."""
+    required = [column for column in required_columns if column in df.columns]
+    extras = sorted(column for column in df.columns if column not in required_columns)
+    return [*required, *extras]
+
+
+def _sort_sample_edges(df: pd.DataFrame) -> pd.DataFrame:
+    """Return edges sorted in a deterministic order while preserving ties."""
+    ranked = df.assign(
+        relationship_type=df["relationship_type"].astype(str).str.strip().str.lower(),
+        _original_order=range(len(df)),
+    )
+    sorted_df = ranked.sort_values(
+        by=["source", "target", "relationship_type", "_original_order"],
+        kind="mergesort",
+    )
+    return sorted_df.drop(columns=["_original_order"]).reset_index(drop=True)
+
+
+def create_sample_workbook(path: str | None = None) -> str:
     """Create a starter workbook at path and return the created file path."""
+    if path is None:
+        path = get_default_data_path()
     workbook_path = Path(path)
     workbook_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -170,6 +194,12 @@ def create_sample_workbook(path: str = "data/data.xlsx") -> str:
             },
         ]
     )
+
+    nodes_df = nodes_df.loc[:, _ordered_columns(nodes_df, REQUIRED_NODE_COLS)]
+    nodes_df = nodes_df.sort_values(by=["id"], kind="mergesort").reset_index(drop=True)
+
+    edges_df = edges_df.loc[:, _ordered_columns(edges_df, REQUIRED_EDGE_COLS)]
+    edges_df = _sort_sample_edges(edges_df)
 
     save_workbook(nodes_df, edges_df, path=str(workbook_path))
     return str(workbook_path)

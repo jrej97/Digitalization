@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
 - Graph filter updates now use a short debounce to reduce repeated re-renders.
 - Added visible loading feedback during larger graph refreshes.
 
-## [v0.1.0]
+## [v0.1.0] - 2026-02-21
 
 ### Added
 - Initial NiceGUI app with workbook load/validate/render/edit/export flow.

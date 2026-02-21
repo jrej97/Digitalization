@@ -14,6 +14,11 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+Optional path overrides:
+
+- `DHVIZ_DATA_PATH` (default: `data/data.xlsx`)
+- `DHVIZ_EXPORT_DIR` (default: `exports/`)
+
 ## Reproduce a graph from scratch (Demo/Sample flow)
 
 1. Start the app:
@@ -52,6 +57,12 @@ For a no-UI smoke flow:
 
 ```bash
 python scripts/smoke_check.py
+```
+
+For the full pre-release quality gate:
+
+```bash
+python scripts/quality_gate.py
 ```
 
 Expected result: printed artifact paths and final `OK`.
