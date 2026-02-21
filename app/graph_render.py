@@ -3,12 +3,43 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from uuid import uuid4
 
-from nicegui import ui
+from fastapi import Body
+from nicegui import app, ui
 
 _CYTOSCAPE_CDN_INJECTED = False
 _CYTOSCAPE_CDN_URL = 'https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js'
+_SELECTION_ENDPOINT_REGISTERED = False
+_SELECTION_CALLBACKS: dict[str, Callable[[dict], None]] = {}
+
+
+def _ensure_selection_endpoint() -> None:
+    """Register an API endpoint that receives Cytoscape selection payloads from JS."""
+    global _SELECTION_ENDPOINT_REGISTERED
+    if _SELECTION_ENDPOINT_REGISTERED:
+        return
+
+    @app.post('/api/selection/{selection_id}')
+    async def _receive_selection(selection_id: str, payload: dict = Body(default=None)) -> dict[str, str]:
+        callback = _SELECTION_CALLBACKS.get(selection_id)
+        if callback is None:
+            return {'status': 'ignored'}
+
+        safe_payload = payload if isinstance(payload, dict) else {}
+        kind = safe_payload.get('kind')
+        if kind not in {'node', 'edge', 'none'}:
+            kind = 'none'
+
+        data = safe_payload.get('data')
+        if not isinstance(data, dict):
+            data = {}
+
+        callback({'kind': kind, 'data': data})
+        return {'status': 'ok'}
+
+    _SELECTION_ENDPOINT_REGISTERED = True
 
 
 def _ensure_cytoscape_cdn() -> None:
@@ -33,12 +64,17 @@ def _ensure_cytoscape_cdn() -> None:
     _CYTOSCAPE_CDN_INJECTED = True
 
 
-def render_cytoscape(container, elements: list[dict], *, height: str = '75vh') -> None:
+def render_cytoscape(container, elements: list[dict], *, height: str = '75vh', on_select=None) -> None:
     """Render Cytoscape graph inside the given NiceGUI container."""
     _ensure_cytoscape_cdn()
+    if on_select is not None:
+        _ensure_selection_endpoint()
 
     container_id = f'cy-{uuid4().hex}'
     serialized_elements = json.dumps(elements)
+    selection_id = uuid4().hex if on_select is not None else None
+    if selection_id is not None:
+        _SELECTION_CALLBACKS[selection_id] = on_select
 
     with container:
         ui.html(
@@ -51,11 +87,21 @@ def render_cytoscape(container, elements: list[dict], *, height: str = '75vh') -
           const targetId = {json.dumps(container_id)};
           const graphElements = {serialized_elements};
 
+          function sendSelection(kind, data) {{
+            const selectionId = {json.dumps(selection_id)};
+            if (!selectionId) return;
+            fetch(`/api/selection/${{selectionId}}`, {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ kind, data }}),
+            }}).catch(() => {{}});
+          }}
+
           function initCytoscape() {{
             const host = document.getElementById(targetId);
             if (!host || !window.cytoscape) return false;
 
-            window.cytoscape({{
+            const cy = window.cytoscape({{
               container: host,
               elements: graphElements,
               style: [
@@ -96,6 +142,20 @@ def render_cytoscape(container, elements: list[dict], *, height: str = '75vh') -
                 padding: 36,
                 nodeRepulsion: 400000,
                 idealEdgeLength: 110
+              }}
+            }});
+
+            cy.on('tap', 'node', (event) => {{
+              sendSelection('node', event.target.data());
+            }});
+
+            cy.on('tap', 'edge', (event) => {{
+              sendSelection('edge', event.target.data());
+            }});
+
+            cy.on('tap', (event) => {{
+              if (event.target === cy) {{
+                sendSelection('none', {{}});
               }}
             }});
             return true;
