@@ -3,6 +3,7 @@
 from nicegui import ui
 
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
+from app.graph_render import render_cytoscape
 from app.io_excel import load_workbook
 from app.validate import validate_data
 
@@ -15,6 +16,7 @@ def index() -> None:
     validation_messages: list[str] = []
     built_elements_status = ''
     networkx_status = ''
+    elements: list[dict] | None = None
 
     try:
         nodes_df, edges_df = load_workbook()
@@ -55,9 +57,14 @@ def index() -> None:
 
         with ui.column().classes('w-3/5 h-full p-6 gap-4'):
             ui.label('Crime Network Viewer').classes('text-2xl font-bold text-slate-800')
-            with ui.card().classes('w-full h-full items-center justify-center bg-white'):
-                ui.icon('hub').classes('text-6xl text-slate-400')
-                ui.label('Graph will render here').classes('text-lg text-slate-600')
+            graph_card = ui.card().classes('w-full h-full bg-white')
+            if elements is not None:
+                render_cytoscape(graph_card, elements)
+            else:
+                with graph_card:
+                    with ui.column().classes('w-full h-full items-center justify-center'):
+                        ui.icon('hub').classes('text-6xl text-slate-400')
+                        ui.label('Graph will render here').classes('text-lg text-slate-600')
 
         with ui.column().classes('w-1/5 min-w-52 h-full bg-white border-l border-slate-200 p-4 gap-3'):
             ui.label('Inspector').classes('text-lg font-semibold text-slate-800')
