@@ -8,6 +8,7 @@ from typing import Any
 
 from nicegui import ui
 
+from app.config import get_default_data_path
 from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
 from app.export import export_csv, export_gexf, export_summary
@@ -48,6 +49,8 @@ def index() -> None:
     selection_state = {'kind': 'none', 'data': {}}
     last_selection_signature = {'value': None}
     filter_debounce = {'token': 0}
+    workbook_path = Path(get_default_data_path())
+    workbook_label = str(workbook_path)
 
     def has_validation_errors() -> bool:
         return bool(state['validation_errors'])
@@ -817,7 +820,7 @@ def index() -> None:
 
         mark_clean()
         refresh_sidebar_status()
-        ui.notify('Saved to data/data.xlsx', type='positive')
+        ui.notify(f'Saved to {workbook_label}', type='positive')
 
     def on_export_csv() -> None:
         nodes_df = state['nodes_df']
@@ -883,17 +886,14 @@ def index() -> None:
         return True
 
     def create_sample_and_reload() -> None:
-        workbook_path = 'data/data.xlsx'
-        created_path = create_sample_workbook(workbook_path)
-        nodes_df, edges_df = load_workbook(workbook_path)
+        created_path = create_sample_workbook(str(workbook_path))
+        nodes_df, edges_df = load_workbook(str(workbook_path))
         if apply_loaded_workbook(nodes_df, edges_df):
             reset_filters()
             render_graph_view()
             ui.notify(f'Created sample workbook at {created_path}', type='positive')
 
     def on_demo_mode() -> None:
-        workbook_path = Path('data/data.xlsx')
-
         def load_existing() -> None:
             try:
                 nodes_df, edges_df = load_workbook(str(workbook_path))
@@ -914,7 +914,7 @@ def index() -> None:
 
         with ui.dialog() as dialog, ui.card().classes('w-[30rem]'):
             ui.label('Demo Mode').classes('text-lg font-semibold')
-            ui.label('data/data.xlsx already exists. Load it as-is, or overwrite with sample data?')
+            ui.label(f'{workbook_label} already exists. Load it as-is, or overwrite with sample data?')
 
             def run_overwrite() -> None:
                 def proceed() -> None:
@@ -930,11 +930,10 @@ def index() -> None:
         dialog.open()
 
     def on_create_sample_workbook() -> None:
-        workbook_path = Path('data/data.xlsx')
         if workbook_path.exists():
             with ui.dialog() as dialog, ui.card().classes('w-96'):
                 ui.label('Overwrite existing workbook?').classes('text-lg font-semibold')
-                ui.label('data/data.xlsx already exists. This will replace it.')
+                ui.label(f'{workbook_label} already exists. This will replace it.')
 
                 def confirm_overwrite() -> None:
                     create_sample_and_reload()

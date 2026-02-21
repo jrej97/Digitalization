@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "digitalization"
 version = "0.1.0"
 description = "Crime network NiceGUI app"
+readme = "README.md"
+license = { text = "Proprietary" }
 requires-python = ">=3.10"
 dependencies = [
     "nicegui",

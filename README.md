@@ -44,6 +44,20 @@ Then open the local URL shown in the terminal (typically `http://127.0.0.1:8080`
 
 Use the sidebar action **Create Sample Workbook** to generate `data/data.xlsx` with valid starter nodes/edges.
 
+## Configuration (optional)
+
+You can override default paths with environment variables:
+
+- `DHVIZ_DATA_PATH`: default workbook path (default: `data/data.xlsx`)
+- `DHVIZ_EXPORT_DIR`: default export directory (default: `exports/`)
+
+Examples:
+
+```bash
+export DHVIZ_DATA_PATH=/absolute/path/to/data.xlsx
+export DHVIZ_EXPORT_DIR=/absolute/path/to/exports
+```
+
 ## Run tests
 
 ```bash
@@ -54,6 +68,14 @@ pytest -q
 
 ```bash
 python scripts/smoke_check.py
+```
+
+## Quality gate
+
+Run the full pre-release check command:
+
+```bash
+python scripts/quality_gate.py
 ```
 
 ## Thesis citation template
