@@ -30,6 +30,16 @@ python -m app.main
 
 Then open the local URL shown in the terminal (typically `http://127.0.0.1:8080`).
 
+## Documentation
+
+- Data schema: [`docs/DATA_SCHEMA.md`](docs/DATA_SCHEMA.md)
+- Thesis workflow: [`docs/WORKFLOW.md`](docs/WORKFLOW.md)
+- Architecture summary: [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md)
+
+## Starter workbook
+
+Use the sidebar action **Create Sample Workbook** to generate `data/data.xlsx` with valid starter nodes/edges.
+
 ## Run tests
 
 ```bash
