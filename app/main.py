@@ -3,6 +3,7 @@
 from nicegui import ui
 
 from app.io_excel import load_workbook
+from app.validate import validate_data
 
 
 @ui.page('/')
@@ -10,11 +11,19 @@ def index() -> None:
     """Render the phase-0 layout skeleton."""
     status_text = ''
     status_classes = 'text-sm '
+    validation_messages: list[str] = []
 
     try:
         nodes_df, edges_df = load_workbook()
-        status_text = f'Loaded: {len(nodes_df)} nodes, {len(edges_df)} edges'
-        status_classes += 'text-emerald-300'
+        validation_errors = validate_data(nodes_df, edges_df)
+
+        if validation_errors:
+            status_text = f'Validation errors: {len(validation_errors)}'
+            status_classes += 'text-amber-300'
+            validation_messages = [error['message'] for error in validation_errors[:5]]
+        else:
+            status_text = f'Loaded: {len(nodes_df)} nodes, {len(edges_df)} edges'
+            status_classes += 'text-emerald-300'
     except (FileNotFoundError, ValueError) as error:
         status_text = f'Workbook error: {error}'
         status_classes += 'text-rose-300'
@@ -23,6 +32,8 @@ def index() -> None:
         with ui.column().classes('w-1/5 min-w-52 h-full bg-slate-900 text-white p-4 gap-3'):
             ui.label('Sidebar').classes('text-lg font-semibold')
             ui.label(status_text).classes(status_classes)
+            for message in validation_messages:
+                ui.label(f'• {message}').classes('text-xs text-amber-100')
             ui.separator().classes('bg-slate-700')
             ui.label('Placeholder controls').classes('text-sm text-slate-300')
             ui.button('Load workbook (coming soon)').props('outline')
