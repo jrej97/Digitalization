@@ -11,12 +11,18 @@ from nicegui import ui
 from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
 from app.export import export_csv, export_gexf, export_summary
-from app.filtering import apply_filters
+from app.filtering import (
+    DEFAULT_NODE_TYPE_FILTER,
+    DEFAULT_RELATIONSHIP_FILTER,
+    DEFAULT_SEARCH_FILTER,
+    apply_filters,
+)
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
 from app.io_excel import load_workbook, save_workbook
 from app.provenance import ensure_metadata_columns, is_valid_optional_date, parse_optional_confidence
 from app.sample_data import create_sample_workbook
+from app.state_guardrails import is_dirty, mark_clean, mark_dirty
 from app.validate import validate_data
 
 
@@ -33,12 +39,15 @@ def index() -> None:
         'networkx_status': '',
         'elements': None,
         'nx_graph': None,
-        'filter_type': 'All',
-        'filter_relationship_type': 'All',
-        'filter_search': '',
+        'filter_type': DEFAULT_NODE_TYPE_FILTER,
+        'filter_relationship_type': DEFAULT_RELATIONSHIP_FILTER,
+        'filter_search': DEFAULT_SEARCH_FILTER,
+        'active_view': 'graph',
+        'render_loading': False,
     }
     selection_state = {'kind': 'none', 'data': {}}
     last_selection_signature = {'value': None}
+    filter_debounce = {'token': 0}
 
     def has_validation_errors() -> bool:
         return bool(state['validation_errors'])
@@ -105,6 +114,7 @@ def index() -> None:
         nodes_df, edges_df = load_workbook()
         state['nodes_df'] = nodes_df
         state['edges_df'] = edges_df
+        mark_clean()
         refresh_graph_state()
     except (FileNotFoundError, ValueError) as error:
         state['status_text'] = f"Workbook error: {error} Tip: click 'Create Sample Workbook' to generate a starter file."
@@ -125,13 +135,20 @@ def index() -> None:
 
             ui.separator().classes('bg-slate-700')
             ui.label('Filters (Graph view)').classes('text-sm text-slate-300')
+            dirty_label = ui.label('Saved').classes('text-xs text-emerald-300')
+
             type_filter = ui.select(
                 options=['All', 'Person', 'Place', 'Institution', 'Group'],
                 label='Node type',
-                value='All',
+                value=DEFAULT_NODE_TYPE_FILTER,
             ).classes('w-full')
-            rel_filter = ui.select(options=['All'], label='relationship_type', value='All').classes('w-full')
+            rel_filter = ui.select(
+                options=[DEFAULT_RELATIONSHIP_FILTER],
+                label='relationship_type',
+                value=DEFAULT_RELATIONSHIP_FILTER,
+            ).classes('w-full')
             label_search = ui.input('Search label contains').props('dense clearable').classes('w-full')
+            reset_filters_button = ui.button('Reset Filters').props('outline')
 
             ui.separator().classes('bg-slate-700')
             ui.label('Navigation').classes('text-sm text-slate-300')
@@ -139,6 +156,7 @@ def index() -> None:
             manage_button = ui.button('Manage Nodes').props('outline')
             manage_edges_button = ui.button('Manage Edges').props('outline')
             save_button = ui.button('Save to Excel').props('color=primary')
+            demo_button = ui.button('Demo Mode').props('outline')
             sample_button = ui.button('Create Sample Workbook').props('outline')
             export_csv_button = ui.button('Export CSV').props('outline')
             export_gexf_button = ui.button('Export GEXF').props('outline')
@@ -151,6 +169,8 @@ def index() -> None:
                 built_label.set_visibility(bool(state['built_elements_status']))
                 networkx_label.set_text(state['networkx_status'])
                 networkx_label.set_visibility(bool(state['networkx_status']))
+                dirty_label.set_text('Unsaved changes' if is_dirty() else 'Saved')
+                dirty_label.classes(replace='text-xs text-amber-300' if is_dirty() else 'text-xs text-emerald-300')
 
                 error_count_label.set_text(f"{len(state['validation_errors'])} error(s)")
                 validation_list.clear()
@@ -183,6 +203,32 @@ def index() -> None:
         selection_state.update(kind='none', data={})
         last_selection_signature['value'] = None
         refresh_inspector()
+
+    def confirm_discard_unsaved(on_confirm) -> bool:
+        if not is_dirty():
+            on_confirm()
+            return True
+
+        with ui.dialog() as dialog, ui.card().classes('w-[28rem]'):
+            ui.label('Unsaved changes').classes('text-lg font-semibold')
+            ui.label('You have unsaved changes. Save first?')
+
+            def save_then_continue() -> None:
+                on_save_to_excel()
+                if not is_dirty():
+                    on_confirm()
+                dialog.close()
+
+            def continue_without_saving() -> None:
+                on_confirm()
+                dialog.close()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('Cancel', on_click=dialog.close).props('outline')
+                ui.button('Discard', on_click=continue_without_saving).props('outline color=negative')
+                ui.button('Save', on_click=save_then_continue).props('color=primary')
+        dialog.open()
+        return False
 
     def copy_errors() -> None:
         if not state['validation_errors']:
@@ -231,8 +277,11 @@ def index() -> None:
                         ui.label(value).classes('text-slate-800 text-right break-all')
 
     def render_graph_view() -> None:
+        state['active_view'] = 'graph'
         view_container.clear()
         with view_container:
+            if state['render_loading']:
+                ui.label('Loading…').classes('text-sm text-slate-500')
             graph_card = ui.card().classes('w-full h-full bg-white')
             if state['elements'] is not None:
                 render_cytoscape(
@@ -267,6 +316,7 @@ def index() -> None:
             return False
 
         state['edges_df'] = updated_edges_df
+        mark_dirty()
         refresh_graph_state()
         refresh_sidebar_status()
         refresh_edges_table()
@@ -275,29 +325,51 @@ def index() -> None:
         return True
 
     def on_filter_change() -> None:
-        state['filter_type'] = str(type_filter.value or 'All')
-        state['filter_relationship_type'] = str(rel_filter.value or 'All')
-        state['filter_search'] = str(label_search.value or '')
+        nodes_df = state['nodes_df']
+        edges_df = state['edges_df']
+        state['render_loading'] = bool(nodes_df is not None and edges_df is not None and (len(nodes_df) + len(edges_df) > 300))
+        render_graph_view()
+        state['filter_type'] = str(type_filter.value or DEFAULT_NODE_TYPE_FILTER)
+        state['filter_relationship_type'] = str(rel_filter.value or DEFAULT_RELATIONSHIP_FILTER)
+        state['filter_search'] = str(label_search.value or DEFAULT_SEARCH_FILTER)
         refresh_graph_state()
         refresh_sidebar_status()
+        state['render_loading'] = False
         render_graph_view()
+
+    def on_filter_change_debounced() -> None:
+        filter_debounce['token'] += 1
+        current_token = filter_debounce['token']
+
+        def run_if_latest() -> None:
+            if current_token != filter_debounce['token']:
+                return
+            on_filter_change()
+
+        ui.timer(0.25, run_if_latest, once=True)
 
     def refresh_relationship_filter_options() -> None:
         edges_df = state['edges_df']
         if edges_df is None or 'relationship_type' not in edges_df.columns:
-            rel_filter.options = ['All']
-            rel_filter.value = 'All'
+            rel_filter.options = [DEFAULT_RELATIONSHIP_FILTER]
+            rel_filter.value = DEFAULT_RELATIONSHIP_FILTER
             return
         values = sorted({str(v) for v in edges_df['relationship_type'].fillna('').tolist() if str(v)})
-        options = ['All', *values]
+        options = [DEFAULT_RELATIONSHIP_FILTER, *values]
         rel_filter.options = options
         if rel_filter.value not in options:
-            rel_filter.value = 'All'
+            rel_filter.value = DEFAULT_RELATIONSHIP_FILTER
         rel_filter.update()
 
-    type_filter.on_value_change(lambda _: on_filter_change())
-    rel_filter.on_value_change(lambda _: on_filter_change())
-    label_search.on_value_change(lambda _: on_filter_change())
+    def reset_filters() -> None:
+        type_filter.value = DEFAULT_NODE_TYPE_FILTER
+        rel_filter.value = DEFAULT_RELATIONSHIP_FILTER
+        label_search.value = DEFAULT_SEARCH_FILTER
+        on_filter_change()
+
+    type_filter.on_value_change(lambda _: on_filter_change_debounced())
+    rel_filter.on_value_change(lambda _: on_filter_change_debounced())
+    label_search.on_value_change(lambda _: on_filter_change_debounced())
 
     def current_nodes_rows() -> list[dict]:
         nodes_df = state['nodes_df']
@@ -442,6 +514,8 @@ def index() -> None:
                             state['nodes_df'].at[editing_index, key] = value
                     selected_node['id'] = id_value
 
+                mark_dirty()
+
                 refresh_relationship_filter_options()
                 refresh_graph_state()
                 refresh_sidebar_status()
@@ -480,6 +554,7 @@ def index() -> None:
             def confirm_delete() -> None:
                 state['nodes_df'] = nodes_df[~nodes_df['id'].astype(str).eq(str(node_id))].reset_index(drop=True)
                 selected_node['id'] = None
+                mark_dirty()
                 refresh_graph_state()
                 refresh_sidebar_status()
                 refresh_nodes_table()
@@ -494,6 +569,7 @@ def index() -> None:
         dialog.open()
 
     def render_manage_nodes_view() -> None:
+        state['active_view'] = 'manage_nodes'
         view_container.clear()
         with view_container:
             with ui.card().classes('w-full h-full bg-white'):
@@ -676,6 +752,7 @@ def index() -> None:
         dialog.open()
 
     def render_manage_edges_view() -> None:
+        state['active_view'] = 'manage_edges'
         view_container.clear()
         with view_container:
             with ui.card().classes('w-full h-full bg-white'):
@@ -738,6 +815,8 @@ def index() -> None:
             ui.notify(str(error), type='negative')
             return
 
+        mark_clean()
+        refresh_sidebar_status()
         ui.notify('Saved to data/data.xlsx', type='positive')
 
     def on_export_csv() -> None:
@@ -793,6 +872,7 @@ def index() -> None:
 
         state['nodes_df'] = nodes_df
         state['edges_df'] = edges_df
+        mark_clean()
         refresh_relationship_filter_options()
         refresh_graph_state()
         refresh_sidebar_status()
@@ -807,7 +887,47 @@ def index() -> None:
         created_path = create_sample_workbook(workbook_path)
         nodes_df, edges_df = load_workbook(workbook_path)
         if apply_loaded_workbook(nodes_df, edges_df):
+            reset_filters()
+            render_graph_view()
             ui.notify(f'Created sample workbook at {created_path}', type='positive')
+
+    def on_demo_mode() -> None:
+        workbook_path = Path('data/data.xlsx')
+
+        def load_existing() -> None:
+            try:
+                nodes_df, edges_df = load_workbook(str(workbook_path))
+            except (FileNotFoundError, ValueError) as error:
+                ui.notify(f'Cannot load workbook: {error}', type='negative')
+                return
+            if apply_loaded_workbook(nodes_df, edges_df):
+                reset_filters()
+                render_graph_view()
+                ui.notify('Demo Mode loaded existing workbook', type='positive')
+
+        def overwrite_with_sample() -> None:
+            create_sample_and_reload()
+
+        if not workbook_path.exists():
+            overwrite_with_sample()
+            return
+
+        with ui.dialog() as dialog, ui.card().classes('w-[30rem]'):
+            ui.label('Demo Mode').classes('text-lg font-semibold')
+            ui.label('data/data.xlsx already exists. Load it as-is, or overwrite with sample data?')
+
+            def run_overwrite() -> None:
+                def proceed() -> None:
+                    overwrite_with_sample()
+
+                confirm_discard_unsaved(proceed)
+                dialog.close()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('Cancel', on_click=dialog.close).props('outline')
+                ui.button('Load existing', on_click=lambda: (load_existing(), dialog.close())).props('outline')
+                ui.button('Overwrite with sample', on_click=run_overwrite).props('color=primary')
+        dialog.open()
 
     def on_create_sample_workbook() -> None:
         workbook_path = Path('data/data.xlsx')
@@ -830,8 +950,17 @@ def index() -> None:
 
     manage_button.on_click(render_manage_nodes_view)
     manage_edges_button.on_click(render_manage_edges_view)
-    back_button.on_click(render_graph_view)
+
+    def on_back_to_graph() -> None:
+        if state['active_view'] in {'manage_nodes', 'manage_edges'}:
+            confirm_discard_unsaved(render_graph_view)
+            return
+        render_graph_view()
+
+    back_button.on_click(on_back_to_graph)
     save_button.on_click(on_save_to_excel)
+    reset_filters_button.on_click(reset_filters)
+    demo_button.on_click(on_demo_mode)
     sample_button.on_click(on_create_sample_workbook)
     export_csv_button.on_click(on_export_csv)
     export_gexf_button.on_click(on_export_gexf)
