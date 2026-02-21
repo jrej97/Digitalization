@@ -2,6 +2,8 @@
 
 NiceGUI-based local app for loading, validating, rendering, editing, saving, and exporting crime-network workbook data.
 
+**Current version:** `v0.1.0`
+
 ## Requirements
 
 - Python 3.10+
@@ -43,8 +45,14 @@ Use the sidebar action **Create Sample Workbook** to generate `data/data.xlsx` w
 ## Run tests
 
 ```bash
-pytest
+pytest -q
 ```
+
+## Thesis citation template
+
+Use this short format in thesis references:
+
+> Crime Network App (v0.1.0). Digitalization project repository. Accessed YYYY-MM-DD.
 
 ### Restricted environments (e.g., proxy/air-gapped CI)
 
