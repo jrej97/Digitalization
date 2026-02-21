@@ -2,3 +2,4 @@ nicegui
 pandas
 openpyxl
 pytest
+networkx
