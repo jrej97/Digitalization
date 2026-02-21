@@ -12,6 +12,7 @@ if __package__ is None or __package__ == '':
 
 from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
+from app.export import export_csv, export_gexf
 from app.formatting import format_inspector_rows
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
@@ -31,6 +32,7 @@ def index() -> None:
         'built_elements_status': '',
         'networkx_status': '',
         'elements': None,
+        'nx_graph': None,
     }
     selection_state = {'kind': 'none', 'data': {}}
     last_selection_signature = {'value': None}
@@ -49,6 +51,7 @@ def index() -> None:
             state['built_elements_status'] = ''
             state['networkx_status'] = ''
             state['elements'] = None
+            state['nx_graph'] = None
             return
 
         state['status_text'] = f"Loaded: {len(nodes_df)} nodes, {len(edges_df)} edges"
@@ -59,6 +62,7 @@ def index() -> None:
         edge_elements = sum(1 for element in elements if 'source' in element['data'])
         state['built_elements_status'] = f'Built: {node_elements} node elements, {edge_elements} edge elements'
         graph = build_networkx_graph(nodes_df, edges_df)
+        state['nx_graph'] = graph
         state['networkx_status'] = f'NetworkX: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges'
 
     try:
@@ -84,6 +88,8 @@ def index() -> None:
             manage_button = ui.button('Manage Nodes').props('outline')
             manage_edges_button = ui.button('Manage Edges').props('outline')
             save_button = ui.button('Save to Excel').props('color=primary')
+            export_csv_button = ui.button('Export CSV').props('outline')
+            export_gexf_button = ui.button('Export GEXF').props('outline')
 
             def refresh_sidebar_status() -> None:
                 status_label.set_text(state['status_text'])
@@ -549,10 +555,49 @@ def index() -> None:
 
         ui.notify('Saved to data/data.xlsx', type='positive')
 
+    def on_export_csv() -> None:
+        nodes_df = state['nodes_df']
+        edges_df = state['edges_df']
+        if nodes_df is None or edges_df is None:
+            ui.notify('Cannot export: workbook data is not loaded', type='warning')
+            return
+
+        errors = validate_data(nodes_df, edges_df)
+        if errors:
+            set_validation_error_state(errors)
+            ui.notify('Cannot export CSV: fix validation errors first', type='warning')
+            return
+
+        nodes_path, edges_path = export_csv(nodes_df, edges_df)
+        ui.notify(f'Exported CSV: {nodes_path}, {edges_path}', type='positive')
+
+    def on_export_gexf() -> None:
+        nodes_df = state['nodes_df']
+        edges_df = state['edges_df']
+        if nodes_df is None or edges_df is None:
+            ui.notify('Cannot export: workbook data is not loaded', type='warning')
+            return
+
+        errors = validate_data(nodes_df, edges_df)
+        if errors:
+            set_validation_error_state(errors)
+            ui.notify('Cannot export GEXF: fix validation errors first', type='warning')
+            return
+
+        nx_graph = state['nx_graph']
+        if nx_graph is None:
+            nx_graph = build_networkx_graph(nodes_df, edges_df)
+            state['nx_graph'] = nx_graph
+
+        gexf_path = export_gexf(nx_graph)
+        ui.notify(f'Exported GEXF: {gexf_path}', type='positive')
+
     manage_button.on_click(render_manage_nodes_view)
     manage_edges_button.on_click(render_manage_edges_view)
     back_button.on_click(render_graph_view)
     save_button.on_click(on_save_to_excel)
+    export_csv_button.on_click(on_export_csv)
+    export_gexf_button.on_click(on_export_gexf)
 
     ui.timer(0.1, refresh_inspector)
 
