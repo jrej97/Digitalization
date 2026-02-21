@@ -1,0 +1,11 @@
+# requirements-lock.txt
+#
+# Placeholder lock workflow for offline/unresolvable environments.
+# This repository could not resolve packages from PyPI in the current
+# execution environment, so pinned versions are not included here.
+#
+# On a connected machine, generate this lock file with:
+#   pip install -r requirements.txt
+#   pip freeze > requirements-lock.txt
+#
+# Then commit the generated pinned output for thesis-grade reproducibility.
