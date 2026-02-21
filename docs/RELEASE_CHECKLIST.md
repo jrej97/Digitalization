@@ -16,13 +16,14 @@ python -m app.main
 
 Verify:
 - Graph view loads.
-- Demo Mode loads sample data.
+- **Demo Mode** loads sample data when a workbook already exists.
+- **Create Sample Workbook** creates a starter workbook when needed.
 - Manage Nodes / Manage Edges CRUD still works.
 - Save to Excel succeeds.
 
 ## 3) Generate/verify sample data and outputs
 
-- Use **Demo Mode** to populate `data/data.xlsx` if needed.
+- Use **Demo Mode** or **Create Sample Workbook** to populate `data/data.xlsx`.
 - Use sidebar export actions:
   - Export CSV
   - Export GEXF

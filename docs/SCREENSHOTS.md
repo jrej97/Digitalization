@@ -3,7 +3,7 @@
 ## Required screenshots for release/demo
 
 1. **Graph view**
-   - Sidebar visible (filters + Demo Mode + Reset Filters).
+   - Sidebar visible (filters + Demo Mode + Create Sample Workbook + Reset Filters).
    - Graph canvas visible with rendered nodes/edges.
 2. **Manage Nodes view**
    - Table and CRUD buttons visible.
