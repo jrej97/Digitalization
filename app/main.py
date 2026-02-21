@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from nicegui import ui
 
 from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
-from app.export import export_csv, export_gexf
-from app.formatting import format_inspector_rows
+from app.export import export_csv, export_gexf, export_summary
+from app.filtering import apply_filters
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
 from app.io_excel import load_workbook, save_workbook
@@ -19,20 +21,37 @@ from app.validate import validate_data
 
 @ui.page('/')
 def index() -> None:
-    """Render the phase-0 layout skeleton."""
-    state = {
+    """Render the app layout."""
+    state: dict[str, Any] = {
         'nodes_df': None,
         'edges_df': None,
-        'validation_messages': [],
+        'validation_errors': [],
         'status_text': '',
-        'status_classes': 'text-sm ',
+        'status_classes': 'text-sm',
         'built_elements_status': '',
         'networkx_status': '',
         'elements': None,
         'nx_graph': None,
+        'filter_type': 'All',
+        'filter_relationship_type': 'All',
+        'filter_search': '',
     }
     selection_state = {'kind': 'none', 'data': {}}
     last_selection_signature = {'value': None}
+
+    def has_validation_errors() -> bool:
+        return bool(state['validation_errors'])
+
+    def format_error(error: dict[str, Any]) -> str:
+        where = str(error.get('where', '') or '').strip()
+        row = error.get('row')
+        parts = []
+        if where:
+            parts.append(where)
+        if row not in (None, ''):
+            parts.append(f'row={row}')
+        prefix = f"[{', '.join(parts)}] " if parts else ''
+        return prefix + str(error.get('message', 'Unknown validation error'))
 
     def refresh_graph_state() -> None:
         nodes_df = state['nodes_df']
@@ -41,7 +60,7 @@ def index() -> None:
             return
 
         errors = validate_data(nodes_df, edges_df)
-        state['validation_messages'] = [error['message'] for error in errors[:5]]
+        state['validation_errors'] = errors
         if errors:
             state['status_text'] = f'Validation errors: {len(errors)}'
             state['status_classes'] = 'text-sm text-amber-300'
@@ -53,14 +72,33 @@ def index() -> None:
 
         state['status_text'] = f"Loaded: {len(nodes_df)} nodes, {len(edges_df)} edges"
         state['status_classes'] = 'text-sm text-emerald-300'
-        elements = build_cytoscape_elements(nodes_df, edges_df)
+
+        nodes_f, edges_f = apply_filters(
+            nodes_df,
+            edges_df,
+            state['filter_type'],
+            state['filter_relationship_type'],
+            state['filter_search'],
+        )
+
+        if selection_state['kind'] == 'node':
+            selected_id = str(selection_state['data'].get('id', ''))
+            if selected_id and not nodes_f['id'].astype(str).eq(selected_id).any():
+                clear_selection()
+        elif selection_state['kind'] == 'edge':
+            selected_id = str(selection_state['data'].get('id', ''))
+            edge_ids = build_cytoscape_elements(nodes_f, edges_f)
+            if selected_id and not any(el['data'].get('id') == selected_id for el in edge_ids if 'source' in el['data']):
+                clear_selection()
+
+        elements = build_cytoscape_elements(nodes_f, edges_f)
         state['elements'] = elements
         node_elements = sum(1 for element in elements if 'label' in element['data'])
         edge_elements = sum(1 for element in elements if 'source' in element['data'])
-        state['built_elements_status'] = f'Built: {node_elements} node elements, {edge_elements} edge elements'
+        state['built_elements_status'] = f'Rendered: {node_elements} nodes, {edge_elements} edges (filtered)'
         graph = build_networkx_graph(nodes_df, edges_df)
         state['nx_graph'] = graph
-        state['networkx_status'] = f'NetworkX: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges'
+        state['networkx_status'] = f'NetworkX (full): {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges'
 
     try:
         nodes_df, edges_df = load_workbook()
@@ -68,19 +106,31 @@ def index() -> None:
         state['edges_df'] = edges_df
         refresh_graph_state()
     except (FileNotFoundError, ValueError) as error:
-        state['status_text'] = (
-            f"Workbook error: {error} "
-            "Tip: click 'Create Sample Workbook' to generate a starter file."
-        )
+        state['status_text'] = f"Workbook error: {error} Tip: click 'Create Sample Workbook' to generate a starter file."
         state['status_classes'] = 'text-sm text-rose-300'
 
     with ui.row().classes('w-full h-screen no-wrap bg-slate-100'):
-        with ui.column().classes('w-1/5 min-w-52 h-full bg-slate-900 text-white p-4 gap-3'):
+        with ui.column().classes('w-1/5 min-w-60 h-full bg-slate-900 text-white p-4 gap-3'):
             ui.label('Sidebar').classes('text-lg font-semibold')
             status_label = ui.label(state['status_text']).classes(state['status_classes'])
             built_label = ui.label(state['built_elements_status']).classes('text-xs text-emerald-100')
             networkx_label = ui.label(state['networkx_status']).classes('text-xs text-emerald-100')
-            validation_list = ui.column().classes('w-full gap-1')
+
+            with ui.card().classes('w-full bg-slate-800 text-white'):
+                ui.label('Validation').classes('text-sm font-semibold')
+                error_count_label = ui.label().classes('text-xs text-amber-200')
+                copy_errors_button = ui.button('Copy errors').props('outline dense')
+                validation_list = ui.column().classes('w-full gap-1 max-h-32 overflow-auto')
+
+            ui.separator().classes('bg-slate-700')
+            ui.label('Filters (Graph view)').classes('text-sm text-slate-300')
+            type_filter = ui.select(
+                options=['All', 'Person', 'Place', 'Institution', 'Group'],
+                label='Node type',
+                value='All',
+            ).classes('w-full')
+            rel_filter = ui.select(options=['All'], label='relationship_type', value='All').classes('w-full')
+            label_search = ui.input('Search label contains').props('dense clearable').classes('w-full')
 
             ui.separator().classes('bg-slate-700')
             ui.label('Navigation').classes('text-sm text-slate-300')
@@ -91,6 +141,7 @@ def index() -> None:
             sample_button = ui.button('Create Sample Workbook').props('outline')
             export_csv_button = ui.button('Export CSV').props('outline')
             export_gexf_button = ui.button('Export GEXF').props('outline')
+            export_summary_button = ui.button('Export Summary').props('outline')
 
             def refresh_sidebar_status() -> None:
                 status_label.set_text(state['status_text'])
@@ -99,55 +150,84 @@ def index() -> None:
                 built_label.set_visibility(bool(state['built_elements_status']))
                 networkx_label.set_text(state['networkx_status'])
                 networkx_label.set_visibility(bool(state['networkx_status']))
+
+                error_count_label.set_text(f"{len(state['validation_errors'])} error(s)")
                 validation_list.clear()
                 with validation_list:
-                    for message in state['validation_messages']:
-                        ui.label(f'• {message}').classes('text-xs text-amber-100')
+                    for error in state['validation_errors']:
+                        ui.label(f"• {format_error(error)}").classes('text-xs text-amber-100 break-words')
+
+                disabled = has_validation_errors()
+                save_button.disable() if disabled else save_button.enable()
+                export_csv_button.disable() if disabled else export_csv_button.enable()
+                export_gexf_button.disable() if disabled else export_gexf_button.enable()
+                export_summary_button.disable() if disabled else export_summary_button.enable()
 
         with ui.column().classes('w-3/5 h-full p-6 gap-4'):
             ui.label('Crime Network Viewer').classes('text-2xl font-bold text-slate-800')
             view_container = ui.column().classes('w-full h-full')
 
-        with ui.column().classes('w-1/5 min-w-52 h-full bg-white border-l border-slate-200 p-4 gap-3'):
+        with ui.column().classes('w-1/5 min-w-60 h-full bg-white border-l border-slate-200 p-4 gap-3'):
             ui.label('Inspector').classes('text-lg font-semibold text-slate-800')
             ui.separator()
             inspector_placeholder = ui.label('Select a node/edge to inspect').classes('text-sm text-slate-500')
-            inspector_kind = ui.label().classes('text-sm text-slate-700 font-medium')
-            inspector_rows = ui.column().classes('w-full gap-1')
+            inspector_rows = ui.column().classes('w-full gap-2')
 
     nodes_table = {'element': None}
     edges_table = {'element': None}
     selected_node = {'id': None}
     selected_edge = {'index': None}
 
-    def refresh_inspector() -> None:
-        kind = selection_state.get('kind', 'none')
-        selection_signature = (kind, repr(selection_state.get('data', {})))
-        if selection_signature == last_selection_signature['value']:
-            return
-        last_selection_signature['value'] = selection_signature
-
-        if kind == 'none':
-            inspector_placeholder.set_visibility(True)
-            inspector_kind.set_text('')
-            inspector_rows.clear()
-            return
-
-        inspector_placeholder.set_visibility(False)
-        inspector_kind.set_text(f"Kind: {'Node' if kind == 'node' else 'Edge'}")
-
-        rows = format_inspector_rows(kind, selection_state.get('data', {}))
-        inspector_rows.clear()
-        with inspector_rows:
-            for key, value in rows:
-                with ui.row().classes('w-full justify-between gap-2 text-sm'):
-                    ui.label(key).classes('text-slate-500')
-                    ui.label(value).classes('text-slate-800 text-right break-all')
-
     def clear_selection() -> None:
         selection_state.update(kind='none', data={})
         last_selection_signature['value'] = None
         refresh_inspector()
+
+    def copy_errors() -> None:
+        if not state['validation_errors']:
+            ui.notify('No validation errors to copy', type='info')
+            return
+        payload = '\n'.join(format_error(error) for error in state['validation_errors'])
+        ui.run_javascript(f'navigator.clipboard.writeText({json.dumps(payload)})')
+        ui.notify('Errors copied to clipboard', type='positive')
+
+    copy_errors_button.on_click(copy_errors)
+
+    def refresh_inspector() -> None:
+        kind = selection_state.get('kind', 'none')
+        data = selection_state.get('data', {}) if isinstance(selection_state.get('data'), dict) else {}
+        selection_signature = (kind, repr(data))
+        if selection_signature == last_selection_signature['value']:
+            return
+        last_selection_signature['value'] = selection_signature
+
+        inspector_rows.clear()
+        if kind == 'none':
+            inspector_placeholder.set_visibility(True)
+            return
+
+        inspector_placeholder.set_visibility(False)
+        with inspector_rows:
+            if kind == 'node':
+                ui.label(str(data.get('label', ''))).classes('text-lg font-semibold text-slate-900')
+                ui.label(f"id: {data.get('id', '')}").classes('text-xs text-slate-500')
+                ui.label(f"Type: {data.get('type', '')}").classes('text-sm font-medium text-indigo-700')
+                ui.label(str(data.get('description', '') or '')).classes('text-sm text-slate-700')
+                core_keys = {'id', 'label', 'type', 'description'}
+            else:
+                ui.label(str(data.get('relationship_type', ''))).classes('text-lg font-semibold text-slate-900')
+                ui.label(f"{data.get('source', '')} → {data.get('target', '')}").classes('text-sm text-slate-600')
+                ui.label(str(data.get('description', '') or '')).classes('text-sm text-slate-700')
+                core_keys = {'id', 'source', 'target', 'relationship_type', 'description'}
+
+            extras = sorted((k, str(v)) for k, v in data.items() if k not in core_keys)
+            with ui.expansion('More fields', value=False).classes('w-full'):
+                if not extras:
+                    ui.label('(none)').classes('text-xs text-slate-500')
+                for key, value in extras:
+                    with ui.row().classes('w-full justify-between gap-2 text-sm'):
+                        ui.label(key).classes('text-slate-500')
+                        ui.label(value).classes('text-slate-800 text-right break-all')
 
     def render_graph_view() -> None:
         view_container.clear()
@@ -169,7 +249,7 @@ def index() -> None:
                         ui.label('Graph will render here').classes('text-lg text-slate-600')
 
     def set_validation_error_state(errors: list[dict]) -> None:
-        state['validation_messages'] = [error['message'] for error in errors[:5]]
+        state['validation_errors'] = errors
         state['status_text'] = f'Validation errors: {len(errors)}'
         state['status_classes'] = 'text-sm text-amber-300'
         refresh_sidebar_status()
@@ -192,6 +272,31 @@ def index() -> None:
         render_graph_view()
         clear_selection()
         return True
+
+    def on_filter_change() -> None:
+        state['filter_type'] = str(type_filter.value or 'All')
+        state['filter_relationship_type'] = str(rel_filter.value or 'All')
+        state['filter_search'] = str(label_search.value or '')
+        refresh_graph_state()
+        refresh_sidebar_status()
+        render_graph_view()
+
+    def refresh_relationship_filter_options() -> None:
+        edges_df = state['edges_df']
+        if edges_df is None or 'relationship_type' not in edges_df.columns:
+            rel_filter.options = ['All']
+            rel_filter.value = 'All'
+            return
+        values = sorted({str(v) for v in edges_df['relationship_type'].fillna('').tolist() if str(v)})
+        options = ['All', *values]
+        rel_filter.options = options
+        if rel_filter.value not in options:
+            rel_filter.value = 'All'
+        rel_filter.update()
+
+    type_filter.on_value_change(lambda _: on_filter_change())
+    rel_filter.on_value_change(lambda _: on_filter_change())
+    label_search.on_value_change(lambda _: on_filter_change())
 
     def current_nodes_rows() -> list[dict]:
         nodes_df = state['nodes_df']
@@ -281,12 +386,7 @@ def index() -> None:
                     error_label.set_text(f"Node id '{id_value}' is already in use")
                     return
 
-                new_row = {
-                    'id': id_value,
-                    'label': label_value,
-                    'type': type_value,
-                    'description': description_value,
-                }
+                new_row = {'id': id_value, 'label': label_value, 'type': type_value, 'description': description_value}
 
                 if mode == 'add':
                     state['nodes_df'] = nodes_df.loc[:, nodes_df.columns].copy()
@@ -298,6 +398,7 @@ def index() -> None:
                         state['nodes_df'].at[editing_index, key] = value
                     selected_node['id'] = id_value
 
+                refresh_relationship_filter_options()
                 refresh_graph_state()
                 refresh_sidebar_status()
                 refresh_nodes_table()
@@ -325,10 +426,7 @@ def index() -> None:
 
         allowed, ref_count = can_delete_node(edges_df, str(node_id))
         if not allowed:
-            ui.notify(
-                f"Cannot delete node '{node_id}': referenced by {ref_count} edge(s)",
-                type='warning',
-            )
+            ui.notify(f"Cannot delete node '{node_id}': referenced by {ref_count} edge(s)", type='warning')
             return
 
         with ui.dialog() as dialog, ui.card().classes('w-96'):
@@ -411,9 +509,7 @@ def index() -> None:
                 'description': str(row.get('description', '') or ''),
             }
 
-        node_options = {
-            str(row['id']): f"{row['id']} — {row.get('label', '')}" for _, row in nodes_df.iterrows()
-        }
+        node_options = {str(row['id']): f"{row['id']} — {row.get('label', '')}" for _, row in nodes_df.iterrows()}
 
         with ui.dialog() as dialog, ui.card().classes('w-96'):
             ui.label('Add Edge' if mode == 'add' else 'Edit Edge').classes('text-lg font-semibold')
@@ -455,6 +551,7 @@ def index() -> None:
                     selected_edge['index'] = editing_index
 
                 if apply_edges_update(updated_edges_df):
+                    refresh_relationship_filter_options()
                     dialog.close()
 
             with ui.row().classes('w-full justify-end gap-2'):
@@ -484,6 +581,7 @@ def index() -> None:
                 updated_edges_df = edges_df.drop(index=editing_index)
                 selected_edge['index'] = None
                 if apply_edges_update(updated_edges_df):
+                    refresh_relationship_filter_options()
                     dialog.close()
 
             with ui.row().classes('w-full justify-end gap-2'):
@@ -533,6 +631,7 @@ def index() -> None:
                     ui.button('Delete', on_click=delete_selected_edge).props('outline color=negative')
 
     render_graph_view()
+    refresh_relationship_filter_options()
     refresh_sidebar_status()
 
     def on_save_to_excel() -> None:
@@ -541,10 +640,7 @@ def index() -> None:
         if nodes_df is None or edges_df is None:
             ui.notify('Nothing to save: workbook data is not loaded', type='warning')
             return
-
-        errors = validate_data(nodes_df, edges_df)
-        if errors:
-            set_validation_error_state(errors)
+        if has_validation_errors():
             ui.notify('Cannot save: fix validation errors first', type='warning')
             return
 
@@ -562,10 +658,7 @@ def index() -> None:
         if nodes_df is None or edges_df is None:
             ui.notify('Cannot export: workbook data is not loaded', type='warning')
             return
-
-        errors = validate_data(nodes_df, edges_df)
-        if errors:
-            set_validation_error_state(errors)
+        if has_validation_errors():
             ui.notify('Cannot export CSV: fix validation errors first', type='warning')
             return
 
@@ -578,10 +671,7 @@ def index() -> None:
         if nodes_df is None or edges_df is None:
             ui.notify('Cannot export: workbook data is not loaded', type='warning')
             return
-
-        errors = validate_data(nodes_df, edges_df)
-        if errors:
-            set_validation_error_state(errors)
+        if has_validation_errors():
             ui.notify('Cannot export GEXF: fix validation errors first', type='warning')
             return
 
@@ -593,6 +683,19 @@ def index() -> None:
         gexf_path = export_gexf(nx_graph)
         ui.notify(f'Exported GEXF: {gexf_path}', type='positive')
 
+    def on_export_summary() -> None:
+        nodes_df = state['nodes_df']
+        edges_df = state['edges_df']
+        if nodes_df is None or edges_df is None:
+            ui.notify('Cannot export summary: workbook data is not loaded', type='warning')
+            return
+        if has_validation_errors():
+            ui.notify('Cannot export summary: fix validation errors first', type='warning')
+            return
+
+        summary_path = export_summary(nodes_df, edges_df)
+        ui.notify(f'Exported summary: {summary_path}', type='positive')
+
     def apply_loaded_workbook(nodes_df, edges_df) -> bool:
         validation_errors = validate_data(nodes_df, edges_df)
         if validation_errors:
@@ -602,6 +705,7 @@ def index() -> None:
 
         state['nodes_df'] = nodes_df
         state['edges_df'] = edges_df
+        refresh_relationship_filter_options()
         refresh_graph_state()
         refresh_sidebar_status()
         refresh_nodes_table()
@@ -622,7 +726,7 @@ def index() -> None:
         if workbook_path.exists():
             with ui.dialog() as dialog, ui.card().classes('w-96'):
                 ui.label('Overwrite existing workbook?').classes('text-lg font-semibold')
-                ui.label("data/data.xlsx already exists. This will replace it.")
+                ui.label('data/data.xlsx already exists. This will replace it.')
 
                 def confirm_overwrite() -> None:
                     create_sample_and_reload()
@@ -643,6 +747,7 @@ def index() -> None:
     sample_button.on_click(on_create_sample_workbook)
     export_csv_button.on_click(on_export_csv)
     export_gexf_button.on_click(on_export_gexf)
+    export_summary_button.on_click(on_export_summary)
 
     ui.timer(0.1, refresh_inspector)
 
