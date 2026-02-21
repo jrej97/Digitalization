@@ -10,6 +10,7 @@ from nicegui import ui
 if __package__ is None or __package__ == '':
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
 from app.formatting import format_inspector_rows
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
@@ -79,8 +80,9 @@ def index() -> None:
 
             ui.separator().classes('bg-slate-700')
             ui.label('Navigation').classes('text-sm text-slate-300')
-            manage_button = ui.button('Manage Nodes').props('outline')
             back_button = ui.button('Back to Graph').props('outline')
+            manage_button = ui.button('Manage Nodes').props('outline')
+            manage_edges_button = ui.button('Manage Edges').props('outline')
 
             def refresh_sidebar_status() -> None:
                 status_label.set_text(state['status_text'])
@@ -94,7 +96,7 @@ def index() -> None:
                     for message in state['validation_messages']:
                         ui.label(f'• {message}').classes('text-xs text-amber-100')
 
-        with ui.column().classes('w-3/5 h-full p-6 gap-4') as center_column:
+        with ui.column().classes('w-3/5 h-full p-6 gap-4'):
             ui.label('Crime Network Viewer').classes('text-2xl font-bold text-slate-800')
             view_container = ui.column().classes('w-full h-full')
 
@@ -106,6 +108,9 @@ def index() -> None:
             inspector_rows = ui.column().classes('w-full gap-1')
 
     nodes_table = {'element': None}
+    edges_table = {'element': None}
+    selected_node = {'id': None}
+    selected_edge = {'index': None}
 
     def refresh_inspector() -> None:
         kind = selection_state.get('kind', 'none')
@@ -155,6 +160,31 @@ def index() -> None:
                         ui.icon('hub').classes('text-6xl text-slate-400')
                         ui.label('Graph will render here').classes('text-lg text-slate-600')
 
+    def set_validation_error_state(errors: list[dict]) -> None:
+        state['validation_messages'] = [error['message'] for error in errors[:5]]
+        state['status_text'] = f'Validation errors: {len(errors)}'
+        state['status_classes'] = 'text-sm text-amber-300'
+        refresh_sidebar_status()
+
+    def apply_edges_update(updated_edges_df) -> bool:
+        nodes_df = state['nodes_df']
+        if nodes_df is None:
+            return False
+
+        errors = validate_data(nodes_df, updated_edges_df)
+        if errors:
+            set_validation_error_state(errors)
+            ui.notify('Cannot apply edge changes due to validation errors', type='warning')
+            return False
+
+        state['edges_df'] = updated_edges_df
+        refresh_graph_state()
+        refresh_sidebar_status()
+        refresh_edges_table()
+        render_graph_view()
+        clear_selection()
+        return True
+
     def current_nodes_rows() -> list[dict]:
         nodes_df = state['nodes_df']
         if nodes_df is None:
@@ -170,7 +200,29 @@ def index() -> None:
         table.rows = current_nodes_rows()
         table.update()
 
-    selected_node = {'id': None}
+    def current_edges_rows() -> list[dict]:
+        edges_df = state['edges_df']
+        if edges_df is None:
+            return []
+        rows: list[dict] = []
+        for index, row in edges_df.iterrows():
+            rows.append(
+                {
+                    'row_id': int(index),
+                    'source': str(row.get('source', '') or ''),
+                    'target': str(row.get('target', '') or ''),
+                    'relationship_type': str(row.get('relationship_type', '') or ''),
+                    'description': str(row.get('description', '') or ''),
+                }
+            )
+        return rows
+
+    def refresh_edges_table() -> None:
+        table = edges_table['element']
+        if table is None:
+            return
+        table.rows = current_edges_rows()
+        table.update()
 
     def open_node_dialog(mode: str) -> None:
         editing_id = selected_node['id']
@@ -325,14 +377,162 @@ def index() -> None:
                     ui.button('Edit', on_click=lambda: open_node_dialog('edit')).props('outline')
                     ui.button('Delete', on_click=delete_selected_node).props('outline color=negative')
 
+    def open_edge_dialog(mode: str) -> None:
+        edges_df = state['edges_df']
+        nodes_df = state['nodes_df']
+        editing_index = selected_edge['index']
+
+        if edges_df is None or nodes_df is None:
+            ui.notify('Data is not available', type='negative')
+            return
+
+        if mode == 'edit' and editing_index is None:
+            ui.notify('Select an edge row first', type='warning')
+            return
+
+        initial = {'source': '', 'target': '', 'relationship_type': '', 'description': ''}
+        if mode == 'edit':
+            if editing_index not in edges_df.index:
+                ui.notify('Selected edge no longer exists', type='warning')
+                return
+            row = edges_df.loc[editing_index]
+            initial = {
+                'source': str(row.get('source', '') or ''),
+                'target': str(row.get('target', '') or ''),
+                'relationship_type': str(row.get('relationship_type', '') or ''),
+                'description': str(row.get('description', '') or ''),
+            }
+
+        node_options = {
+            str(row['id']): f"{row['id']} — {row.get('label', '')}" for _, row in nodes_df.iterrows()
+        }
+
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label('Add Edge' if mode == 'add' else 'Edit Edge').classes('text-lg font-semibold')
+            source = ui.select(options=node_options, label='source', value=initial['source'])
+            target = ui.select(options=node_options, label='target', value=initial['target'])
+            relationship_type = ui.input('relationship_type', value=initial['relationship_type'])
+            description = ui.textarea('description', value=initial['description'])
+            error_label = ui.label().classes('text-sm text-rose-600')
+
+            def save_edge() -> None:
+                source_value = str(source.value or '').strip()
+                target_value = str(target.value or '').strip()
+                rel_value = str(relationship_type.value or '').strip()
+                description_value = str(description.value or '').strip()
+
+                ok, message = can_add_or_edit_edge(nodes_df, source_value, target_value, rel_value)
+                if not ok:
+                    error_label.set_text(message)
+                    return
+
+                updated_edges_df = edges_df.copy()
+                if mode == 'add':
+                    row_data = {col: '' for col in updated_edges_df.columns}
+                    row_data.update(
+                        {
+                            'source': source_value,
+                            'target': target_value,
+                            'relationship_type': rel_value,
+                            'description': description_value,
+                        }
+                    )
+                    updated_edges_df.loc[len(updated_edges_df)] = row_data
+                    selected_edge['index'] = updated_edges_df.index[-1]
+                else:
+                    updated_edges_df.at[editing_index, 'source'] = source_value
+                    updated_edges_df.at[editing_index, 'target'] = target_value
+                    updated_edges_df.at[editing_index, 'relationship_type'] = rel_value
+                    updated_edges_df.at[editing_index, 'description'] = description_value
+                    selected_edge['index'] = editing_index
+
+                if apply_edges_update(updated_edges_df):
+                    dialog.close()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('Cancel', on_click=dialog.close).props('outline')
+                ui.button('Save', on_click=save_edge)
+
+        dialog.open()
+
+    def delete_selected_edge() -> None:
+        edges_df = state['edges_df']
+        editing_index = selected_edge['index']
+        if edges_df is None:
+            ui.notify('Data is not available', type='negative')
+            return
+        if editing_index is None or editing_index not in edges_df.index:
+            ui.notify('Select an edge row first', type='warning')
+            return
+
+        row = edges_df.loc[editing_index]
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label('Delete edge?').classes('text-lg font-semibold')
+            ui.label(
+                f"Delete edge '{row.get('source', '')} → {row.get('target', '')}' ({row.get('relationship_type', '')})?"
+            )
+
+            def confirm_delete() -> None:
+                updated_edges_df = edges_df.drop(index=editing_index)
+                selected_edge['index'] = None
+                if apply_edges_update(updated_edges_df):
+                    dialog.close()
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('Cancel', on_click=dialog.close).props('outline')
+                ui.button('Delete', on_click=confirm_delete).props('outline color=negative')
+
+        dialog.open()
+
+    def render_manage_edges_view() -> None:
+        view_container.clear()
+        with view_container:
+            with ui.card().classes('w-full h-full bg-white'):
+                ui.label('Manage Edges').classes('text-xl font-semibold text-slate-800')
+                ui.label('Add, edit, or delete edges in memory (not saved to Excel yet).').classes(
+                    'text-sm text-slate-500'
+                )
+                columns = [
+                    {'name': 'source', 'label': 'source', 'field': 'source', 'required': True, 'align': 'left'},
+                    {'name': 'target', 'label': 'target', 'field': 'target', 'required': True, 'align': 'left'},
+                    {
+                        'name': 'relationship_type',
+                        'label': 'relationship_type',
+                        'field': 'relationship_type',
+                        'required': True,
+                        'align': 'left',
+                    },
+                    {'name': 'description', 'label': 'description', 'field': 'description', 'align': 'left'},
+                ]
+                edges_table['element'] = ui.table(
+                    columns=columns,
+                    rows=current_edges_rows(),
+                    row_key='row_id',
+                    selection='single',
+                    pagination={'rowsPerPage': 10},
+                ).classes('w-full')
+
+                def on_row_select(event) -> None:
+                    row = event.args.get('added', [])
+                    if row:
+                        selected_edge['index'] = int(row[0].get('row_id'))
+
+                edges_table['element'].on('selection', on_row_select)
+
+                with ui.row().classes('gap-2 mt-2'):
+                    ui.button('Add', on_click=lambda: open_edge_dialog('add'))
+                    ui.button('Edit', on_click=lambda: open_edge_dialog('edit')).props('outline')
+                    ui.button('Delete', on_click=delete_selected_edge).props('outline color=negative')
+
     render_graph_view()
     refresh_sidebar_status()
 
     manage_button.on_click(render_manage_nodes_view)
+    manage_edges_button.on_click(render_manage_edges_view)
     back_button.on_click(render_graph_view)
 
     ui.timer(0.1, refresh_inspector)
 
 
-if __name__ in {"__main__", "__mp_main__"}:
+if __name__ in {'__main__', '__mp_main__'}:
     ui.run(title='Crime Network App (Phase 0)')
