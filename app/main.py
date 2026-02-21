@@ -15,7 +15,7 @@ from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id
 from app.formatting import format_inspector_rows
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
-from app.io_excel import load_workbook
+from app.io_excel import load_workbook, save_workbook
 from app.validate import validate_data
 
 
@@ -83,6 +83,7 @@ def index() -> None:
             back_button = ui.button('Back to Graph').props('outline')
             manage_button = ui.button('Manage Nodes').props('outline')
             manage_edges_button = ui.button('Manage Edges').props('outline')
+            save_button = ui.button('Save to Excel').props('color=primary')
 
             def refresh_sidebar_status() -> None:
                 status_label.set_text(state['status_text'])
@@ -348,7 +349,7 @@ def index() -> None:
         with view_container:
             with ui.card().classes('w-full h-full bg-white'):
                 ui.label('Manage Nodes').classes('text-xl font-semibold text-slate-800')
-                ui.label('Add, edit, or delete nodes in memory (not saved to Excel yet).').classes(
+                ui.label('Add, edit, or delete nodes in memory. Use "Save to Excel" to persist changes.').classes(
                     'text-sm text-slate-500'
                 )
                 columns = [
@@ -489,7 +490,7 @@ def index() -> None:
         with view_container:
             with ui.card().classes('w-full h-full bg-white'):
                 ui.label('Manage Edges').classes('text-xl font-semibold text-slate-800')
-                ui.label('Add, edit, or delete edges in memory (not saved to Excel yet).').classes(
+                ui.label('Add, edit, or delete edges in memory. Use "Save to Excel" to persist changes.').classes(
                     'text-sm text-slate-500'
                 )
                 columns = [
@@ -527,9 +528,31 @@ def index() -> None:
     render_graph_view()
     refresh_sidebar_status()
 
+    def on_save_to_excel() -> None:
+        nodes_df = state['nodes_df']
+        edges_df = state['edges_df']
+        if nodes_df is None or edges_df is None:
+            ui.notify('Nothing to save: workbook data is not loaded', type='warning')
+            return
+
+        errors = validate_data(nodes_df, edges_df)
+        if errors:
+            set_validation_error_state(errors)
+            ui.notify('Cannot save: fix validation errors first', type='warning')
+            return
+
+        try:
+            save_workbook(nodes_df, edges_df)
+        except RuntimeError as error:
+            ui.notify(str(error), type='negative')
+            return
+
+        ui.notify('Saved to data/data.xlsx', type='positive')
+
     manage_button.on_click(render_manage_nodes_view)
     manage_edges_button.on_click(render_manage_edges_view)
     back_button.on_click(render_graph_view)
+    save_button.on_click(on_save_to_excel)
 
     ui.timer(0.1, refresh_inspector)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -55,3 +56,30 @@ def load_workbook(path: str = "data/data.xlsx") -> tuple[pd.DataFrame, pd.DataFr
         raise ValueError(f"Workbook is missing required column(s): {'; '.join(errors)}.")
 
     return nodes_df, edges_df
+
+
+def _ordered_columns(df: pd.DataFrame, required_cols: list[str]) -> list[str]:
+    required = [col for col in required_cols if col in df.columns]
+    extras = [col for col in df.columns if col not in required_cols]
+    return required + extras
+
+
+def save_workbook(nodes_df: pd.DataFrame, edges_df: pd.DataFrame, path: str = "data/data.xlsx") -> None:
+    """Persist nodes and edges dataframes to an Excel workbook using safe-write semantics."""
+    workbook_path = Path(path)
+    workbook_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ordered_nodes = nodes_df.loc[:, _ordered_columns(nodes_df, REQUIRED_NODE_COLS)]
+    ordered_edges = edges_df.loc[:, _ordered_columns(edges_df, REQUIRED_EDGE_COLS)]
+
+    temp_path = workbook_path.parent / f".tmp_{workbook_path.name}"
+
+    try:
+        with pd.ExcelWriter(temp_path, engine="openpyxl") as writer:
+            ordered_nodes.to_excel(writer, sheet_name=SHEET_NODES, index=False)
+            ordered_edges.to_excel(writer, sheet_name=SHEET_EDGES, index=False)
+        os.replace(temp_path, workbook_path)
+    except Exception as error:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise RuntimeError(f"Failed to save workbook to '{workbook_path}': {error}") from error
