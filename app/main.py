@@ -15,6 +15,7 @@ from app.filtering import apply_filters
 from app.graph_build import build_cytoscape_elements, build_networkx_graph
 from app.graph_render import render_cytoscape
 from app.io_excel import load_workbook, save_workbook
+from app.provenance import ensure_metadata_columns, is_valid_optional_date, parse_optional_confidence
 from app.sample_data import create_sample_workbook
 from app.validate import validate_data
 
@@ -302,7 +303,7 @@ def index() -> None:
         nodes_df = state['nodes_df']
         if nodes_df is None:
             return []
-        expected_cols = ['id', 'label', 'type', 'description']
+        expected_cols = ['id', 'label', 'type', 'description', 'source_ref', 'date', 'confidence']
         available_cols = [col for col in expected_cols if col in nodes_df.columns]
         return nodes_df[available_cols].fillna('').to_dict('records')
 
@@ -326,6 +327,9 @@ def index() -> None:
                     'target': str(row.get('target', '') or ''),
                     'relationship_type': str(row.get('relationship_type', '') or ''),
                     'description': str(row.get('description', '') or ''),
+                    'source_ref': str(row.get('source_ref', '') or ''),
+                    'date': str(row.get('date', '') or ''),
+                    'confidence': str(row.get('confidence', '') or ''),
                 }
             )
         return rows
@@ -348,7 +352,15 @@ def index() -> None:
             ui.notify('Nodes are not available', type='negative')
             return
 
-        initial = {'id': '', 'label': '', 'type': NODE_TYPE_OPTIONS[0], 'description': ''}
+        initial = {
+            'id': '',
+            'label': '',
+            'type': NODE_TYPE_OPTIONS[0],
+            'description': '',
+            'source_ref': '',
+            'date': '',
+            'confidence': '',
+        }
         editing_index = None
         if mode == 'edit':
             matches = nodes_df.index[nodes_df['id'].astype(str).eq(str(editing_id))].tolist()
@@ -362,6 +374,9 @@ def index() -> None:
                 'label': str(row.get('label', '')),
                 'type': str(row.get('type', NODE_TYPE_OPTIONS[0])),
                 'description': str(row.get('description', '')),
+                'source_ref': str(row.get('source_ref', '') or ''),
+                'date': str(row.get('date', '') or ''),
+                'confidence': str(row.get('confidence', '') or ''),
             }
 
         with ui.dialog() as dialog, ui.card().classes('w-96'):
@@ -370,6 +385,9 @@ def index() -> None:
             label = ui.input('label', value=initial['label'])
             node_type = ui.select(options=NODE_TYPE_OPTIONS, label='type', value=initial['type'])
             description = ui.textarea('description', value=initial['description'])
+            source_ref = ui.input('source_ref (optional)', value=initial['source_ref'])
+            date = ui.input('date (YYYY-MM-DD, optional)', value=initial['date'])
+            confidence = ui.number('confidence (0-1, optional)', value=initial['confidence'] or None, min=0, max=1)
             error_label = ui.label().classes('text-sm text-rose-600')
 
             def save_node() -> None:
@@ -377,25 +395,51 @@ def index() -> None:
                 label_value = label.value.strip() if isinstance(label.value, str) else ''
                 type_value = node_type.value if isinstance(node_type.value, str) else ''
                 description_value = description.value.strip() if isinstance(description.value, str) else ''
+                source_ref_value = source_ref.value.strip() if isinstance(source_ref.value, str) else ''
+                date_value = date.value.strip() if isinstance(date.value, str) else ''
+                confidence_raw = confidence.value
 
                 if not id_value or not label_value or not type_value:
                     error_label.set_text('id, label, and type are required')
+                    return
+
+                if not is_valid_optional_date(date_value):
+                    error_label.set_text('date must be empty or use YYYY-MM-DD')
+                    return
+
+                confidence_ok, confidence_value = parse_optional_confidence(confidence_raw)
+                if not confidence_ok:
+                    error_label.set_text('confidence must be empty or a number between 0 and 1')
                     return
 
                 if not is_unique_node_id(nodes_df, id_value, exclude_index=editing_index):
                     error_label.set_text(f"Node id '{id_value}' is already in use")
                     return
 
-                new_row = {'id': id_value, 'label': label_value, 'type': type_value, 'description': description_value}
+                new_row = {
+                    'id': id_value,
+                    'label': label_value,
+                    'type': type_value,
+                    'description': description_value,
+                    'source_ref': source_ref_value,
+                    'date': date_value,
+                    'confidence': confidence_value,
+                }
+
+                should_store_metadata = any(new_row[column] != '' for column in ('source_ref', 'date', 'confidence'))
+                target_nodes_df = nodes_df
+                if should_store_metadata or any(col in nodes_df.columns for col in ('source_ref', 'date', 'confidence')):
+                    target_nodes_df = ensure_metadata_columns(nodes_df)
 
                 if mode == 'add':
-                    state['nodes_df'] = nodes_df.loc[:, nodes_df.columns].copy()
+                    state['nodes_df'] = target_nodes_df.loc[:, target_nodes_df.columns].copy()
                     state['nodes_df'].loc[len(state['nodes_df'])] = new_row
                     selected_node['id'] = id_value
                 else:
-                    state['nodes_df'] = nodes_df.copy()
+                    state['nodes_df'] = target_nodes_df.copy()
                     for key, value in new_row.items():
-                        state['nodes_df'].at[editing_index, key] = value
+                        if key in state['nodes_df'].columns:
+                            state['nodes_df'].at[editing_index, key] = value
                     selected_node['id'] = id_value
 
                 refresh_relationship_filter_options()
@@ -462,6 +506,9 @@ def index() -> None:
                     {'name': 'label', 'label': 'label', 'field': 'label', 'align': 'left'},
                     {'name': 'type', 'label': 'type', 'field': 'type', 'align': 'left'},
                     {'name': 'description', 'label': 'description', 'field': 'description', 'align': 'left'},
+                    {'name': 'source_ref', 'label': 'source_ref', 'field': 'source_ref', 'align': 'left'},
+                    {'name': 'date', 'label': 'date', 'field': 'date', 'align': 'left'},
+                    {'name': 'confidence', 'label': 'confidence', 'field': 'confidence', 'align': 'left'},
                 ]
                 nodes_table['element'] = ui.table(
                     columns=columns,
@@ -496,7 +543,15 @@ def index() -> None:
             ui.notify('Select an edge row first', type='warning')
             return
 
-        initial = {'source': '', 'target': '', 'relationship_type': '', 'description': ''}
+        initial = {
+            'source': '',
+            'target': '',
+            'relationship_type': '',
+            'description': '',
+            'source_ref': '',
+            'date': '',
+            'confidence': '',
+        }
         if mode == 'edit':
             if editing_index not in edges_df.index:
                 ui.notify('Selected edge no longer exists', type='warning')
@@ -507,6 +562,9 @@ def index() -> None:
                 'target': str(row.get('target', '') or ''),
                 'relationship_type': str(row.get('relationship_type', '') or ''),
                 'description': str(row.get('description', '') or ''),
+                'source_ref': str(row.get('source_ref', '') or ''),
+                'date': str(row.get('date', '') or ''),
+                'confidence': str(row.get('confidence', '') or ''),
             }
 
         node_options = {str(row['id']): f"{row['id']} — {row.get('label', '')}" for _, row in nodes_df.iterrows()}
@@ -517,6 +575,9 @@ def index() -> None:
             target = ui.select(options=node_options, label='target', value=initial['target'])
             relationship_type = ui.input('relationship_type', value=initial['relationship_type'])
             description = ui.textarea('description', value=initial['description'])
+            source_ref = ui.input('source_ref (optional)', value=initial['source_ref'])
+            date = ui.input('date (YYYY-MM-DD, optional)', value=initial['date'])
+            confidence = ui.number('confidence (0-1, optional)', value=initial['confidence'] or None, min=0, max=1)
             error_label = ui.label().classes('text-sm text-rose-600')
 
             def save_edge() -> None:
@@ -524,13 +585,28 @@ def index() -> None:
                 target_value = str(target.value or '').strip()
                 rel_value = str(relationship_type.value or '').strip()
                 description_value = str(description.value or '').strip()
+                source_ref_value = str(source_ref.value or '').strip()
+                date_value = str(date.value or '').strip()
+                confidence_raw = confidence.value
 
                 ok, message = can_add_or_edit_edge(nodes_df, source_value, target_value, rel_value)
                 if not ok:
                     error_label.set_text(message)
                     return
 
-                updated_edges_df = edges_df.copy()
+                if not is_valid_optional_date(date_value):
+                    error_label.set_text('date must be empty or use YYYY-MM-DD')
+                    return
+
+                confidence_ok, confidence_value = parse_optional_confidence(confidence_raw)
+                if not confidence_ok:
+                    error_label.set_text('confidence must be empty or a number between 0 and 1')
+                    return
+
+                should_store_metadata = any(
+                    value != '' for value in (source_ref_value, date_value, confidence_value)
+                ) or any(col in edges_df.columns for col in ('source_ref', 'date', 'confidence'))
+                updated_edges_df = ensure_metadata_columns(edges_df) if should_store_metadata else edges_df.copy()
                 if mode == 'add':
                     row_data = {col: '' for col in updated_edges_df.columns}
                     row_data.update(
@@ -539,6 +615,9 @@ def index() -> None:
                             'target': target_value,
                             'relationship_type': rel_value,
                             'description': description_value,
+                            'source_ref': source_ref_value,
+                            'date': date_value,
+                            'confidence': confidence_value,
                         }
                     )
                     updated_edges_df.loc[len(updated_edges_df)] = row_data
@@ -548,6 +627,12 @@ def index() -> None:
                     updated_edges_df.at[editing_index, 'target'] = target_value
                     updated_edges_df.at[editing_index, 'relationship_type'] = rel_value
                     updated_edges_df.at[editing_index, 'description'] = description_value
+                    if 'source_ref' in updated_edges_df.columns:
+                        updated_edges_df.at[editing_index, 'source_ref'] = source_ref_value
+                    if 'date' in updated_edges_df.columns:
+                        updated_edges_df.at[editing_index, 'date'] = date_value
+                    if 'confidence' in updated_edges_df.columns:
+                        updated_edges_df.at[editing_index, 'confidence'] = confidence_value
                     selected_edge['index'] = editing_index
 
                 if apply_edges_update(updated_edges_df):
@@ -609,6 +694,9 @@ def index() -> None:
                         'align': 'left',
                     },
                     {'name': 'description', 'label': 'description', 'field': 'description', 'align': 'left'},
+                    {'name': 'source_ref', 'label': 'source_ref', 'field': 'source_ref', 'align': 'left'},
+                    {'name': 'date', 'label': 'date', 'field': 'date', 'align': 'left'},
+                    {'name': 'confidence', 'label': 'confidence', 'field': 'confidence', 'align': 'left'},
                 ]
                 edges_table['element'] = ui.table(
                     columns=columns,
