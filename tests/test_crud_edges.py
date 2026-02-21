@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
 
 from app.crud_edges import can_add_or_edit_edge

@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
 
 from app.validate import validate_data

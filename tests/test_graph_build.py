@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
 
 from app.graph_build import build_cytoscape_elements

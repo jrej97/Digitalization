@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import networkx as nx
 import pandas as pd
 
 from app.schema import REQUIRED_EDGE_COLS, REQUIRED_NODE_COLS
@@ -76,8 +75,10 @@ def build_cytoscape_elements(nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> 
     return elements
 
 
-def build_networkx_graph(nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> nx.MultiGraph:
+def build_networkx_graph(nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> "nx.MultiGraph":
     """Build an undirected MultiGraph so duplicate source/target edges are preserved as parallel edges."""
+    import networkx as nx
+
     graph = nx.MultiGraph()
 
     node_required = set(REQUIRED_NODE_COLS)

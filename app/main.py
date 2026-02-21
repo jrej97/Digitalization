@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from nicegui import ui
-
-if __package__ is None or __package__ == '':
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.crud_edges import can_add_or_edit_edge
 from app.crud_nodes import NODE_TYPE_OPTIONS, can_delete_node, is_unique_node_id

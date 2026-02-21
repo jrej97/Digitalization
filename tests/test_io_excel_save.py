@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
 
 from app.io_excel import save_workbook

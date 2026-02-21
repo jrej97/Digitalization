@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("pandas")
 import pandas as pd
 
 from app.crud_nodes import can_delete_node, edge_reference_count, is_unique_node_id
