@@ -30,6 +30,17 @@ from app.validate import validate_data
 @ui.page('/')
 def index() -> None:
     """Render the app layout."""
+    ui.add_head_html(
+        '''
+        <style>
+          html, body, #app {
+            min-height: 100vh;
+            height: 100%;
+          }
+        </style>
+        '''
+    )
+
     state: dict[str, Any] = {
         'nodes_df': None,
         'edges_df': None,
@@ -123,8 +134,8 @@ def index() -> None:
         state['status_text'] = f"Workbook error: {error} Tip: click 'Create Sample Workbook' to generate a starter file."
         state['status_classes'] = 'text-sm text-rose-300'
 
-    with ui.row().classes('w-full h-screen no-wrap bg-slate-100'):
-        with ui.column().classes('w-1/5 min-w-60 h-full bg-slate-900 text-white p-4 gap-3'):
+    with ui.row().classes('w-full min-h-screen no-wrap items-stretch bg-slate-100'):
+        with ui.column().classes('w-1/5 min-w-60 self-stretch bg-slate-900 text-white p-4 gap-3'):
             ui.label('Sidebar').classes('text-lg font-semibold')
             status_label = ui.label(state['status_text']).classes(state['status_classes'])
             built_label = ui.label(state['built_elements_status']).classes('text-xs text-emerald-100')
@@ -187,11 +198,11 @@ def index() -> None:
                 export_gexf_button.disable() if disabled else export_gexf_button.enable()
                 export_summary_button.disable() if disabled else export_summary_button.enable()
 
-        with ui.column().classes('w-3/5 h-full p-6 gap-4'):
+        with ui.column().classes('w-3/5 self-stretch p-6 gap-4'):
             ui.label('Crime Network Viewer').classes('text-2xl font-bold text-slate-800')
             view_container = ui.column().classes('w-full h-full')
 
-        with ui.column().classes('w-1/5 min-w-60 h-full bg-white border-l border-slate-200 p-4 gap-3'):
+        with ui.column().classes('w-1/5 min-w-60 self-stretch bg-white border-l border-slate-200 p-4 gap-3'):
             ui.label('Inspector').classes('text-lg font-semibold text-slate-800')
             ui.separator()
             inspector_placeholder = ui.label('Select a node/edge to inspect').classes('text-sm text-slate-500')
