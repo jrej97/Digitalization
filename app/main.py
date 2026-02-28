@@ -33,9 +33,29 @@ def index() -> None:
     ui.add_head_html(
         '''
         <style>
-          html, body, #app {
+          html, body, #app,
+          #app .q-layout,
+          #app .q-page-container,
+          #app .q-page,
+          #app .nicegui-content {
             min-height: 100vh;
             height: 100%;
+          }
+
+          #app .nicegui-content {
+            display: flex;
+            padding: 0;
+          }
+
+          .app-shell {
+            min-height: 100vh;
+            display: flex;
+            align-items: stretch;
+            flex: 1 1 auto;
+          }
+
+          .app-shell__sidebar {
+            background-color: rgb(15 23 42);
           }
         </style>
         '''
@@ -134,8 +154,8 @@ def index() -> None:
         state['status_text'] = f"Workbook error: {error} Tip: click 'Create Sample Workbook' to generate a starter file."
         state['status_classes'] = 'text-sm text-rose-300'
 
-    with ui.row().classes('w-full min-h-screen no-wrap items-stretch bg-slate-100'):
-        with ui.column().classes('w-1/5 min-w-60 self-stretch bg-slate-900 text-white p-4 gap-3'):
+    with ui.row().classes('app-shell w-full no-wrap bg-slate-100'):
+        with ui.column().classes('app-shell__sidebar w-1/5 min-w-60 self-stretch text-white p-4 gap-3'):
             ui.label('Sidebar').classes('text-lg font-semibold')
             status_label = ui.label(state['status_text']).classes(state['status_classes'])
             built_label = ui.label(state['built_elements_status']).classes('text-xs text-emerald-100')
